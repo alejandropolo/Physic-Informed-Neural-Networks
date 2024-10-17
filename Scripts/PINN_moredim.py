@@ -595,15 +595,17 @@ class PINN_inference(nn.Module):
             temps = self(ts) 
             # TODO: usar self.boundary_conditions to calculate the loss
 
-            boundary_condition_funcs = list(self.boundary_conditions.values())
-            f_x0 = eval(str(boundary_condition_funcs[0]), {'np': np, 'torch': torch}, {'t': ts[self.mask_boundary_conditions0][:, 0]}).view(-1, 1)
-            f_xL = eval(str(boundary_condition_funcs[1]), {'np': np, 'torch': torch}, {'t': ts[self.mask_boundary_conditionsL][:, 0]}).view(-1, 1)
+            
+            f_x0 = eval(str(self.boundary_conditions[0]), {'np': np, 'torch': torch}, {'t': ts[self.mask_boundary_conditions0][:, 0]}).view(-1, 1)
+            f_xL = eval(str(self.boundary_conditions[1]), {'np': np, 'torch': torch}, {'t': ts[self.mask_boundary_conditionsL][:, 0]}).view(-1, 1)
 
             loss = torch.mean((calculate_derivative(temps, ts, 1, idx=1)[0][self.mask_boundary_conditions0] - f_x0) ** 2)
             loss += torch.mean(
                 (calculate_derivative(temps, ts, 1, idx=1)[0][self.mask_boundary_conditionsL] - f_xL) ** 2
             )
             return loss
+        
+        # elif self.bc_type == 'robin':
 
 
     def update_constants(
@@ -626,20 +628,25 @@ class PINN_inference(nn.Module):
         diff_equation.constants = constant_values
 
 
-    def process_bc(self, diff_equation: DiffEquation, data: tuple, initial_conditions: dict):
+    def create_bc_masks(self, diff_equation: DiffEquation, inputs: torch.Tensor):
+        self.mask_initial_conditions = inputs[:, 0] == 0
+        if diff_equation.dx:
+            self.mask_boundary_conditions0 = inputs[:, 1] == torch.min(
+                inputs[:, 1]
+            )
+            self.mask_boundary_conditionsL = inputs[:, 1] == torch.max(
+                inputs[:, 1]
+            )
+
+
+    def process_bc(self, diff_equation: DiffEquation, data: tuple, initial_conditions: list):
         _, _, X_test_tensor, y_test_tensor = data
+
+        self.create_bc_masks(diff_equation, X_test_tensor)
         
-        self.mask_initial_conditions = X_test_tensor[:, 0] == 0
         self.initial_conditions = y_test_tensor[self.mask_initial_conditions]
 
         if diff_equation.dx:
-            self.mask_boundary_conditions0 = X_test_tensor[:, 1] == torch.min(
-                X_test_tensor[:, 1]
-            )
-            self.mask_boundary_conditionsL = X_test_tensor[:, 1] == torch.max(
-                X_test_tensor[:, 1]
-            )
-
             if self.bc_type == 'neumann':
                 self.boundary_conditions = initial_conditions
             
@@ -937,7 +944,7 @@ def nth_order_ode_solver(
 def load_data(
     diff_equation: DiffEquation,
     params_to_optimize: list,
-    initial_conditions: dict,
+    initial_conditions: list,
     t_0: float,
     t_fin: float,
     n_points: int = 1,
@@ -946,12 +953,13 @@ def load_data(
     ###### With new generalization
     order = diff_equation.order
     ini_conditions = [0 for _ in range(order)]
-    for key in initial_conditions.keys():
-        ic = key.split("_")[1:]
+    for equation in initial_conditions:
+        lhs, rhs = equation.split("=")
+        ic = lhs.split("_")[1:]
         if len(ic) == 1:
-            ini_conditions[0] = initial_conditions[key]
+            ini_conditions[0] = rhs
         else:
-            ini_conditions[len(ic[0])] = initial_conditions[key]
+            ini_conditions[len(ic[0])] = rhs
 
     ode_function: Callable = diff_equation(definition=True)
 

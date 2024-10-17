@@ -1,25 +1,29 @@
 equation:
-  equation: 'u_t - ( K_H - K_Q * u ) / K_th'
+  # TODO: Comprobar formulas 
+  equation: 'u_t - K * u_xx'
   params_to_optimize: []
   func_to_optimize: False
   hidden_layers: [300, 100] # for func_to_optimize = True
   data_from_csv: '' # path to csv file
   constant_values: {
-    'K_H': 2,
-    'K_Q': 2,
-    'K_th': 0.5,
+    'K': 1,
   }
-  f: ''
-  initial_conditions: [
-    'u_0 = 2',
-  ]
+  f: 'torch.exp(-t) * torch.sin(torch.pi *  x)'
+  initial_conditions: {
+    'u.x_t_0': 'torch.pi * torch.exp(-t)', 
+    'u.x_t_-1': '-torch.pi * torch.exp(-t)',
+  }
 
 
 data_load:
-  t_0: 0
-  t_fin: 1
-  n_points: 6
-  noise: 0.0
+  L_min: 0
+  L: 1
+  T: 1.0
+  N_train: 10
+  N_test: 20
+  plate_length: 25
+  max_iter_time: 100
+  alpha: 0.05
 
 model_architecture:
   layers: [10]
