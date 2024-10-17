@@ -16,6 +16,7 @@ Papers/
 *.mp4
 *.png 
 *.docx
+*.gif
 
 # Distribution / packaging
 .Python

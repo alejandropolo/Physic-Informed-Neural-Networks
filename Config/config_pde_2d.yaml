@@ -1,0 +1,31 @@
+equation:
+  equation: 'u_t - alpha * (u_yy + u_xx)'
+  params_to_optimize: []
+  func_to_optimize: False
+  hidden_layers: [300, 100] # for func_to_optimize = True
+  data_from_csv: '' # path to csv file
+  constant_values: {
+    'alpha': 0.05,
+  }
+  f: 'torch.sin(torch.pi * x) * torch.sin(torch.pi * y) * torch.exp(-2 * alpha * torch.pow(torch.tensor(torch.pi), 2) * t)'
+  initial_conditions: {
+    
+  }
+
+
+data_load:
+  plate_length: 25
+  max_iter_time: 100
+  alpha: 0.05
+
+model_architecture:
+  layers: [10]
+  activations: "sigmoid"
+  
+training:
+  lr: 0.01  ## Learning rate
+  lambda_pin: 1  ## Lambda for the physics loss
+  lambda_ic: 1  ## Lambda for the physics loss
+  lambda_bc: 1  ## Lambda for the physics loss
+  n_epochs: 500  ## Number of epochs
+  optimizer: "lbfgs"  ## Optimizer

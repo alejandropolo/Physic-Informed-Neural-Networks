@@ -1,0 +1,38 @@
+equation:
+  # TODO: Comprobar formulas 
+  equation: 'u_t - u_xx + torch.exp(-t) * (torch.sin(torch.pi * x) - torch.pi ** 2 * torch.sin(torch.pi * x))' # 'u_tt + u_xx + 2 * K * u'
+  params_to_optimize: []
+  func_to_optimize: False
+  hidden_layers: [300, 100] # for func_to_optimize = True
+  data_from_csv: '' # path to csv file
+  constant_values: {
+    # 'K': 1,
+  }
+  f: 'torch.exp(-t) * torch.sin(torch.pi *  x)'
+  initial_conditions: {
+    'u_t_0': 0, # 'torch.exp(-t)',
+    'u_t_-1': 0, # 'torch.exp(-t)',
+  }
+
+
+data_load:
+  L_min: -1
+  L: 1
+  T: 1.0
+  N_train: 10
+  N_test: 20
+  plate_length: 25
+  max_iter_time: 100
+  alpha: 0.05
+
+model_architecture:
+  layers: [10]
+  activations: "sigmoid"
+  
+training:
+  lr: 0.01  ## Learning rate
+  lambda_pin: 1  ## Lambda for the physics loss
+  lambda_ic: 1  ## Lambda for the physics loss
+  lambda_bc: 1  ## Lambda for the physics loss
+  n_epochs: 500  ## Number of epochs
+  optimizer: "lbfgs"  ## Optimizer
