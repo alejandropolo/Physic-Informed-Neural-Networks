@@ -1,5 +1,4 @@
 equation:
-  # TODO: Comprobar formulas 
   equation: 'u_t - u_xx + torch.exp(-t) * (torch.sin(torch.pi * x) - torch.pi ** 2 * torch.sin(torch.pi * x))' # 'u_tt + u_xx + 2 * K * u'
   params_to_optimize: []
   func_to_optimize: False
@@ -9,10 +8,14 @@ equation:
     # 'K': 1,
   }
   f: 'torch.exp(-t) * torch.sin(torch.pi *  x)'
-  initial_conditions: {
-    'u.x_t_0': 'torch.pi * torch.exp(-t)', 
-    'u.x_t_-1': '-torch.pi * torch.exp(-t)',
-  }
+  # initial_conditions: {
+  #   'u.x_t_0': 'torch.pi * torch.exp(-t)', 
+  #   'u.x_t_-1': '-torch.pi * torch.exp(-t)',
+  # }
+  initial_conditions: [
+    'udx_t_0 = torch.pi * torch.exp(-t)', 
+    'udx_t_L = -torch.pi * torch.exp(-t)',
+  ]
 
 
 data_load:

@@ -58,6 +58,8 @@ def calculate_derivative(
         List of derivatives of the function
     """
     derivatives_list = []
+    if order == 0:
+        return [outputs]
     derivatives_list.append(grad(outputs, inputs)[0][:, idx : idx + 1])
     for _ in range(order - 1):
         derivatives_list.append(grad(derivatives_list[-1], inputs)[0][:, idx : idx + 1])
@@ -378,7 +380,9 @@ class DiffEquation(torch.nn.Module):
                 local_dict.update({f'u_x{"x" * i}': num_derivatives[i] for i in range(self.orderx)})
                 local_dict["x"] = inputs
                 # local_dict = {'u_t': derivatives / (self.tensor_max - self.tensor_min)}
-                
+                local_dict["t"] = self.tensor_min + inputs * (
+                    self.tensor_max - self.tensor_min
+                )
             else:
                 derivatives_list = calculate_derivative(u, inputs, self.order, 0)
                 local_dict.update({f'u_t{"t" * i}': derivatives_list[i] for i in range(self.order)})
@@ -390,12 +394,9 @@ class DiffEquation(torch.nn.Module):
                     local_dict.update(
                         {f'u_y{"y" * i}': derivatives_list[i] for i in range(self.ordery)}
                     )
+                local_dict["t"] = inputs[:, 0].view(-1, 1)
+                local_dict["x"] = inputs[:, 1].view(-1, 1)
 
-            # local_dict["t"] = self.tensor_min + inputs[:, 0] * (
-            #     self.tensor_max - self.tensor_min
-            # )
-            local_dict["t"] = inputs[:, 0].view(-1, 1)
-            local_dict["x"] = inputs[:, 1].view(-1, 1)
             # Add constants to the local dictionary
             local_dict.update(self.constants)
 
@@ -462,6 +463,32 @@ class DiffEquation(torch.nn.Module):
             return self.forward_pass
         # If we want to solve the ODE/PDE, return the function with torch (physics loss and so on)
         return self.create_function(self.equation)
+
+
+class BoundaryCondition:
+    def __init__(self, eq: str):
+        self.eq = eq
+        self.lhs, self.rhs = eq.split('=')
+        self.elements_to_replace = re.findall(r'u[\w.]*', self.lhs)
+        self.orders = []
+        for elem in self.elements_to_replace:
+            self.u_deriv = elem.split('_')[0].split('d')
+            if len(self.u_deriv) > 1:
+                self.orders.append(len(self.u_deriv[1]))
+            else:
+                self.orders.append(0)
+        
+        self.local_dict = {'np': np, 'torch': torch}
+    
+    def give_value(self, temps, ts, mask):
+        self.local_dict['t'] = ts[mask][:, 0].view(-1, 1)
+        self.local_dict['u'] = temps[mask]
+        self.local_dict['x'] = ts[mask][:, 1].view(-1, 1)
+        for i, elem in enumerate(self.elements_to_replace):
+            self.local_dict[elem] = calculate_derivative(temps, ts, self.orders[i], idx=1)[self.orders[i] - 1][mask]
+        
+        return torch.mean((eval(self.lhs, {}, self.local_dict) - eval(self.rhs, {}, self.local_dict))** 2)
+
 
 
 class PINN_inference(nn.Module):
@@ -542,8 +569,6 @@ class PINN_inference(nn.Module):
 
         ts = data.clone().requires_grad_(True).to(DEVICE)
         temps = self(ts)
-        # f = lambda t, x: torch.exp(-t) * torch.sin(torch.pi * x)
-        # temps = f(ts[:, 0], ts[:, 1]).view(-1, 1)
 
         # First call the differential equation class to create the function and then evaluates it
         if not diff_equation.dx and not diff_equation.func_to_optimize:
@@ -581,32 +606,16 @@ class PINN_inference(nn.Module):
         """
         Compute the boundary conditions loss of the model.
         """
-        if self.bc_type == 'diri':
-            ts = data.clone().requires_grad_(True).to(DEVICE)
-            temps = self(ts)
-            loss = torch.mean((temps[self.mask_boundary_conditions0] - self.boundary_conditions[0]) ** 2)
-            loss += torch.mean(
-                (temps[self.mask_boundary_conditionsL] - self.boundary_conditions[1]) ** 2
-            )
-            return loss
 
-        elif self.bc_type == 'neumann':
-            ts = data.clone().requires_grad_(True).to(DEVICE)
-            temps = self(ts) 
-            # TODO: usar self.boundary_conditions to calculate the loss
-
-            
-            f_x0 = eval(str(self.boundary_conditions[0]), {'np': np, 'torch': torch}, {'t': ts[self.mask_boundary_conditions0][:, 0]}).view(-1, 1)
-            f_xL = eval(str(self.boundary_conditions[1]), {'np': np, 'torch': torch}, {'t': ts[self.mask_boundary_conditionsL][:, 0]}).view(-1, 1)
-
-            loss = torch.mean((calculate_derivative(temps, ts, 1, idx=1)[0][self.mask_boundary_conditions0] - f_x0) ** 2)
-            loss += torch.mean(
-                (calculate_derivative(temps, ts, 1, idx=1)[0][self.mask_boundary_conditionsL] - f_xL) ** 2
-            )
-            return loss
+        ts = data.clone().requires_grad_(True).to(DEVICE)
+        temps = self(ts) 
+        loss = 0
+        bc_class = BoundaryCondition(self.boundary_conditions[1])
+        loss += bc_class.give_value(temps, ts, self.mask_boundary_conditions0)
+        bc_class = BoundaryCondition(self.boundary_conditions[2])
+        loss += bc_class.give_value(temps, ts, self.mask_boundary_conditionsL)
+        return loss
         
-        # elif self.bc_type == 'robin':
-
 
     def update_constants(
         self, diff_equation: DiffEquation, constant_values: dict
@@ -639,7 +648,7 @@ class PINN_inference(nn.Module):
             )
 
 
-    def process_bc(self, diff_equation: DiffEquation, data: tuple, initial_conditions: list):
+    def process_bc(self, diff_equation: DiffEquation, data: tuple, initial_conditions: list[str]):
         _, _, X_test_tensor, y_test_tensor = data
 
         self.create_bc_masks(diff_equation, X_test_tensor)
@@ -647,15 +656,9 @@ class PINN_inference(nn.Module):
         self.initial_conditions = y_test_tensor[self.mask_initial_conditions]
 
         if diff_equation.dx:
-            if self.bc_type == 'neumann':
-                self.boundary_conditions = initial_conditions
+            initial_conditions = [ic.replace('np.', 'torch.') for ic in initial_conditions]
+            self.boundary_conditions = initial_conditions
             
-            elif self.bc_type == 'diri':
-                self.boundary_conditions = (
-                    y_test_tensor[self.mask_boundary_conditions0],
-                    y_test_tensor[self.mask_boundary_conditionsL],
-                )
-
         else:
             # Load the initial conditions into the model
             if diff_equation.order > 1:
@@ -955,11 +958,12 @@ def load_data(
     ini_conditions = [0 for _ in range(order)]
     for equation in initial_conditions:
         lhs, rhs = equation.split("=")
-        ic = lhs.split("_")[1:]
-        if len(ic) == 1:
-            ini_conditions[0] = rhs
+        if '.' not in lhs:
+            ini_conditions[0] = float(rhs)
         else:
-            ini_conditions[len(ic[0])] = rhs
+            order_str = lhs.split("_")[0].split(".")[1]
+            order = len(order_str)
+            ini_conditions[order] = float(rhs)
 
     ode_function: Callable = diff_equation(definition=True)
 
@@ -1043,19 +1047,22 @@ def generate_data(
 
     # Inicialización de la matriz u
     u = np.zeros((N_train, N_train))
-
-    for key, value in initial_conditions.items(): # cambiar
-        ic = key.split("_")[1:]
+    for eq in initial_conditions:
+        lhs, rhs = eq.split('=')
+        ic = lhs.strip().split("_")[1:]
+        ini_func = lambda x: eval(
+            str(rhs), {"x": x, "t": 0}, {"np": np, "torch": torch}
+        )
         if ic[1] == "x":
             # To be able to evaluate the string as a function
-            ini_func = lambda x: eval(
-                str(value), {"x": x, "t": 0}, {"np": np}
-            )
-            u[int(ic[0]), :] = ini_func(X_mesh_train[int(ic[0]), :])
+            u[int(ic[0]), :] = ini_func(X_mesh_train[0, :])
         elif ic[0] == "t":
-            u[:, int(ic[1])] = value
+            if ic[1].strip() == 'L':
+                u[:, -1] = ini_func(X_mesh_train[:, -1])
+            else:
+                u[:, int(ic[1])] = ini_func(X_mesh_train[:, 0])
         else:
-            u[int(ic[0]), int(ic[1])] = value
+            u[int(ic[0]), int(ic[1])] = ini_func(X_mesh_train[int(ic[0]), int(ic[1])])
 
     # Resolución de la ecuación del calor for the current u_L_t value
     sol_train = solve_ivp(
@@ -1085,15 +1092,22 @@ def generate_data(
 
     u = np.zeros((N_test, N_test))
 
-    for key in initial_conditions.keys():
-        ic = key.split("_")[1:]
+    for eq in initial_conditions:
+        lhs, rhs = eq.split('=')
+        ic = lhs.strip().split("_")[1:]
+        ini_func = lambda x: eval(
+            str(rhs), {"x": x, "t": 0}, {"np": np, "torch": torch}
+        )
         if ic[1] == "x":
-            ini_func = lambda x: eval(
-                str(initial_conditions[key]), {"x": x}, {"np": np, "torch": torch}
-            )
-            u[int(ic[0]), :] = ini_func(X_mesh_test[int(ic[0]), :])
+            # To be able to evaluate the string as a function
+            u[int(ic[0]), :] = ini_func(X_mesh_test[0, :])
+        elif ic[0] == "t":
+            if ic[1].strip() == 'L':
+                u[:, -1] = ini_func(X_mesh_test[:, -1])
+            else:
+                u[:, int(ic[1])] = ini_func(X_mesh_test[:, 0])
         else:
-            u[:, int(ic[1])] = initial_conditions[key]
+            u[int(ic[0]), int(ic[1])] = ini_func(X_mesh_test[int(ic[0]), int(ic[1])])
 
     # Resolución de la ecuación del calor for the current u_L_t value
     sol_test = solve_ivp(part_function, (0, T), u[0, :], t_eval=t_test, args=(dx_test,))
@@ -1210,7 +1224,6 @@ def load_data_neumann(
     y = func(input_mesh[:, 0], input_mesh[:, 1])
     y = torch.tensor(y).reshape(len(input_mesh), 1).float()
 
-    # TODO: Parameter inference
     if not (diff_equation.func_to_optimize or params_to_optimize): 
         # Cogemos solo los datos en x == 0 y x == L
         mask = (

@@ -1,5 +1,4 @@
 equation:
-  # TODO: Comprobar formulas 
   equation: 'u_t - K * u_xx'
   params_to_optimize: []
   func_to_optimize: False
@@ -11,7 +10,7 @@ equation:
   f: 'torch.exp(-t) * torch.sin(torch.pi *  x)'
   initial_conditions: {
     'u.x_t_0': 'torch.pi * torch.exp(-t)', 
-    'u.x_t_-1': '-torch.pi * torch.exp(-t)',
+    'u.x_t_': '-torch.pi * torch.exp(-t)',
   }
 
 

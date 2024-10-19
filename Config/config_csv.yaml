@@ -10,9 +10,9 @@ equation:
     'K_th': 0.5,
   }
   f: ''
-  initial_conditions: {
-    'u_0': 2,
-  }
+  initial_conditions: [
+    
+  ]
 
 
 data_load:
