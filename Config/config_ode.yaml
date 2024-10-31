@@ -9,7 +9,6 @@ equation:
     'K_Q': 2,
     'K_th': 0.5,
   }
-  f: ''
   initial_conditions: [
     'u_0 = 2',
   ]

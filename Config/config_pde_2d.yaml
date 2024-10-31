@@ -7,10 +7,14 @@ equation:
   constant_values: {
     'alpha': 0.05,
   }
-  f: 'torch.sin(torch.pi * x) * torch.sin(torch.pi * y) * torch.exp(-2 * alpha * torch.pow(torch.tensor(torch.pi), 2) * t)'
-  initial_conditions: {
-    
-  }
+  f: 'torch.sin(torch.pi * x) * torch.sin(torch.pi * y) * torch.exp(-2 * alpha * torch.pi ** 2 * t)'
+  initial_conditions: [
+    'u_0_x_y = torch.sin(torch.pi * x) * torch.sin(torch.pi * y)',
+    'u_t_0_y = 0',
+    'u_t_x_0 = 0',
+    'u_t_x_L = 0',
+    'u_t_L_y = 0',
+  ]
 
 
 data_load:
@@ -27,5 +31,5 @@ training:
   lambda_pin: 1  ## Lambda for the physics loss
   lambda_ic: 1  ## Lambda for the physics loss
   lambda_bc: 1  ## Lambda for the physics loss
-  n_epochs: 500  ## Number of epochs
+  n_epochs: 100  ## Number of epochs
   optimizer: "lbfgs"  ## Optimizer

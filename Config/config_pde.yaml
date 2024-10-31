@@ -1,5 +1,5 @@
 equation:
-  equation: 'u_t - K * u_xx' # 'u_t - u_xx + torch.exp(-t) * (torch.sin(torch.pi * x) - torch.pi ** 2 * torch.sin(torch.pi * x))' # 'u_tt + u_xx + 2 * K * u'
+  equation: 'u_t - K * u_xx' # 'u_tt + u_xx - 2 * K * u' # 'u_t - u_xx + torch.exp(-t) * (torch.sin(torch.pi * x) - torch.pi ** 2 * torch.sin(torch.pi * x))' # 'u_tt + u_xx + 2 * K * u'
   params_to_optimize: []
   func_to_optimize: False
   hidden_layers: [300, 100] # for func_to_optimize = True

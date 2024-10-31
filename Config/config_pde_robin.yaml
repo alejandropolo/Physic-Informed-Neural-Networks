@@ -1,17 +1,18 @@
 equation:
-  equation: 'u_t - K * u_xx'
+  equation: 'u_t + u_x + x*sin(t) - cos(t)'
   params_to_optimize: []
   func_to_optimize: False
   hidden_layers: [300, 100] # for func_to_optimize = True
   data_from_csv: '' # path to csv file
   constant_values: {
-    'K': 1,
+    # 'K': 1,
   }
-  f: 'torch.exp(-t) * torch.sin(torch.pi *  x)'
-  initial_conditions: {
-    'u.x_t_0': 'torch.pi * torch.exp(-t)', 
-    'u.x_t_': '-torch.pi * torch.exp(-t)',
-  }
+  f: 'x*torch.cos(t)'
+  initial_conditions: [
+    'u_0_x = x',
+    'u_t_0 + udx_t_0 = -2*torch.cos(t)',
+    'u_t_L + udx_t_L = 2*torch.cos(t)',
+  ]
 
 
 data_load:

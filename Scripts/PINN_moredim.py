@@ -60,9 +60,15 @@ def calculate_derivative(
     derivatives_list = []
     if order == 0:
         return [outputs]
-    derivatives_list.append(grad(outputs, inputs)[0][:, idx : idx + 1])
+    derivatives_list.append(grad(outputs, inputs)[0])
+    if idx is not None:
+        derivatives_list[-1] = derivatives_list[-1][:, idx : idx + 1]
     for _ in range(order - 1):
-        derivatives_list.append(grad(derivatives_list[-1], inputs)[0][:, idx : idx + 1])
+        # aqui solo devolvemos el indice(t, x, ...) que queremos (idx) pero para el normal necesitaremos todos
+        derivatives_list.append(grad(derivatives_list[-1], inputs)[0]) 
+        if idx is not None:
+            derivatives_list[-1] = derivatives_list[-1][:, idx : idx + 1]
+
     return derivatives_list
 
 
@@ -333,7 +339,7 @@ class DiffEquation(torch.nn.Module):
                     for I in range(len(derivatives))
                 }
             else:
-                derivatives_list = calculate_derivative(u, t, self.order)
+                derivatives_list = calculate_derivative(u, t, self.order, 0)
                 local_dict = {
                     f'u_t{"t" * i}': derivatives_list[i].view(-1, 1)
                     / (self.tensor_max - self.tensor_min) ** (i + 1)
@@ -397,9 +403,10 @@ class DiffEquation(torch.nn.Module):
                 local_dict["t"] = inputs[:, 0].view(-1, 1)
                 local_dict["x"] = inputs[:, 1].view(-1, 1)
 
+            local_dict["u"] = u
+
             # Add constants to the local dictionary
             local_dict.update(self.constants)
-
             local_dict["np"] = np
             local_dict["torch"] = torch
             local_dict["math"] = math
@@ -481,11 +488,15 @@ class BoundaryCondition:
         self.local_dict = {'np': np, 'torch': torch}
     
     def give_value(self, temps, ts, mask):
-        self.local_dict['t'] = ts[mask][:, 0].view(-1, 1)
-        self.local_dict['u'] = temps[mask]
-        self.local_dict['x'] = ts[mask][:, 1].view(-1, 1)
+        self.local_dict['t'] = ts[mask != 0][:, 0].view(-1, 1)
+        self.local_dict['u'] = temps[mask != 0]
+        self.local_dict['x'] = ts[mask != 0][:, 1].view(-1, 1)
+        derivatives = calculate_derivative(temps, ts, max(self.orders), idx=1)
         for i, elem in enumerate(self.elements_to_replace):
-            self.local_dict[elem] = calculate_derivative(temps, ts, self.orders[i], idx=1)[self.orders[i] - 1][mask]
+            # Aqui habría que multiplicar por el normal con el tensor de normales
+            self.local_dict[elem] = derivatives[self.orders[i] - 1][mask != 0]
+            if self.orders[i] == 1:
+                self.local_dict[elem] = self.local_dict[elem] * mask[mask != 0].view(-1, 1)
         
         return torch.mean((eval(self.lhs, {}, self.local_dict) - eval(self.rhs, {}, self.local_dict))** 2)
 
@@ -606,14 +617,13 @@ class PINN_inference(nn.Module):
         """
         Compute the boundary conditions loss of the model.
         """
-
+        
         ts = data.clone().requires_grad_(True).to(DEVICE)
         temps = self(ts) 
         loss = 0
-        bc_class = BoundaryCondition(self.boundary_conditions[1])
-        loss += bc_class.give_value(temps, ts, self.mask_boundary_conditions0)
-        bc_class = BoundaryCondition(self.boundary_conditions[2])
-        loss += bc_class.give_value(temps, ts, self.mask_boundary_conditionsL)
+        for bc, mask in zip(self.boundary_conditions, self.boundary_masks):
+            bc_class = BoundaryCondition(bc)
+            loss += bc_class.give_value(temps, ts, mask)
         return loss
         
 
@@ -638,26 +648,39 @@ class PINN_inference(nn.Module):
 
 
     def create_bc_masks(self, diff_equation: DiffEquation, inputs: torch.Tensor):
-        self.mask_initial_conditions = inputs[:, 0] == 0
-        if diff_equation.dx:
-            self.mask_boundary_conditions0 = inputs[:, 1] == torch.min(
-                inputs[:, 1]
-            )
-            self.mask_boundary_conditionsL = inputs[:, 1] == torch.max(
-                inputs[:, 1]
-            )
+        """
+        Assumes the bc equations are in the form u_t_0 = 0, udx_t_L_y = torch.sin(t), ...
+        
+        """
+        self.boundary_masks = []
+        self.boundary_masks.append((inputs[:, 1] == torch.min(
+            inputs[:, 1]
+        )) * -1)
+        self.boundary_masks.append(inputs[:, 1] == torch.max(
+            inputs[:, 1]
+        ))
+        if diff_equation.dy:
+            self.boundary_masks.append((inputs[:, 2] == torch.min(
+                inputs[:, 2]
+            )) * -1)
+            self.boundary_masks.append(inputs[:, 2] == torch.max(
+                inputs[:, 2]
+            ))
+            
 
 
     def process_bc(self, diff_equation: DiffEquation, data: tuple, initial_conditions: list[str]):
         _, _, X_test_tensor, y_test_tensor = data
 
-        self.create_bc_masks(diff_equation, X_test_tensor)
+        self.mask_initial_conditions = X_test_tensor[:, 0] == 0
+        if diff_equation.dx:
+            self.create_bc_masks(diff_equation, X_test_tensor)
         
         self.initial_conditions = y_test_tensor[self.mask_initial_conditions]
 
         if diff_equation.dx:
             initial_conditions = [ic.replace('np.', 'torch.') for ic in initial_conditions]
-            self.boundary_conditions = initial_conditions
+            self.boundary_conditions = initial_conditions[1:]
             
         else:
             # Load the initial conditions into the model
@@ -729,15 +752,15 @@ class PINN_inference(nn.Module):
             loss = mse + float(lambda_pin) * physics_loss
 
             # Initial and Boundary Conditions losses
-            if not diff_equation.dy:
-                initial_conditions_loss = self.initial_conditions_loss(
-                    X_test_tensor, diff_equation
-                )
-                loss += lambda_ic * initial_conditions_loss
-                
-                if diff_equation.dx:
-                    boundary_conditions_loss = self.boundary_conditions_loss(X_test_tensor)
-                    loss += lambda_bc * boundary_conditions_loss
+            # if not diff_equation.dy:
+            initial_conditions_loss = self.initial_conditions_loss(
+                X_test_tensor, diff_equation
+            )
+            loss += lambda_ic * initial_conditions_loss
+            
+            if diff_equation.dx:
+                boundary_conditions_loss = self.boundary_conditions_loss(X_test_tensor)
+                loss += lambda_bc * boundary_conditions_loss
 
             loss.backward()
 
@@ -824,7 +847,7 @@ class PINN_inference(nn.Module):
 
         y_pred = self.forward(X_test).detach().numpy()
         u_test = y_pred.reshape((num_test_divisions, num_test_divisions))
-        scatter_pred = go.Scatter3d(
+        scatter_pred_all = go.Scatter3d(
             x=X_test[:, 1],
             y=X_test[:, 0],
             z=y_pred[:, 0],
@@ -832,7 +855,17 @@ class PINN_inference(nn.Module):
             marker=dict(size=2, opacity=0.35, color="red"),
             name="Test Data",
         )
-
+        # TODO: pintar los puntos de boundary conditions e initials
+        boundary_condition_points = []
+        for mask in self.boundary_masks:
+            boundary_condition_points.append(go.Scatter3d(
+                x=X_test[:, 1][mask != 0],
+                y=X_test[:, 0][mask != 0],
+                z=y_pred[:, 0][mask != 0],
+                mode="markers",
+                marker=dict(size=4, opacity=0.9, color="red"),
+                name="Test Data",
+            ))
         # Crear la superficie para la función subyacente
         surface_true = go.Surface(
             x=x_test,
@@ -854,7 +887,7 @@ class PINN_inference(nn.Module):
         )
 
         # Crear el gráfico
-        fig = go.Figure(data=[scatter_test, scatter_pred, surface_true, surface_pred])
+        fig = go.Figure(data=[scatter_test, scatter_pred_all, surface_true, surface_pred] + boundary_condition_points)
         fig.update_layout(
             scene=dict(
                 xaxis_title="x",
@@ -1228,9 +1261,9 @@ def load_data_neumann(
         # Cogemos solo los datos en x == 0 y x == L
         mask = (
             (input_mesh[:, 0] == 0)
-            # (input_mesh[:, 0] < 0.12)
-            # | (input_mesh[:, 1] == L_min)
-            # | (input_mesh[:, 1] == L)
+            # | (input_mesh[:, 0] < 0.12)
+            # (input_mesh[:, 1] == L_min) |
+            # (input_mesh[:, 1] == L)
         )
         input_mesh_train = input_mesh[mask]
         y_train = y[mask]
