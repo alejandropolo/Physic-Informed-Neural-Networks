@@ -64,7 +64,7 @@ def calculate_derivative(
         derivatives_list[-1] = derivatives_list[-1][:, idx : idx + 1]
     for _ in range(order - 1):
         # aqui solo devolvemos el indice(t, x, ...) que queremos (idx) pero para el normal necesitaremos todos
-        derivatives_list.append(grad(derivatives_list[-1], inputs)[0]) 
+        derivatives_list.append(grad(derivatives_list[-1], inputs)[0])
         if idx is not None:
             derivatives_list[-1] = derivatives_list[-1][:, idx : idx + 1]
 
@@ -88,7 +88,9 @@ def numerical_derivative(u: np.ndarray, dx: float, orden: int) -> np.ndarray:
 
 
 def min_max_normalize(
-    tensor: torch.Tensor, min_value: Optional[float] = None, max_value: Optional[float] = None
+    tensor: torch.Tensor,
+    min_value: Optional[float] = None,
+    max_value: Optional[float] = None,
 ) -> tuple[torch.Tensor, float, float]:
     """
     Normalizes a tensor to the range [0, 1].
@@ -119,7 +121,9 @@ class DiffEquation(torch.nn.Module):
         # Check if the equation is a PDE
         self.dx = "u_x" in equation
         self.dy = "u_y" in equation
-        assert self.dx or not self.dy, "When using 1D PDEs, the equation must contain u_x and not u_y"
+        assert (
+            self.dx or not self.dy
+        ), "When using 1D PDEs, the equation must contain u_x and not u_y"
 
         # Store the equation (= 0)
         self.equation = equation
@@ -138,7 +142,7 @@ class DiffEquation(torch.nn.Module):
 
         self.func_to_optimize = func_to_optimize
 
-        if func_to_optimize: # NO DY IN THE EQUATION
+        if func_to_optimize:  # NO DY IN THE EQUATION
             # input size is the number of inputs of the pinn + 1 for the solution (U)
             self.input_size = 2 + int(self.dx) * 3
             self.output_size = 1
@@ -212,7 +216,7 @@ class DiffEquation(torch.nn.Module):
             variable_str: Cleaned variable string.
         """
 
-        functions = ['exp', 'log', 'sin', 'cos', 'pi']
+        functions = ["exp", "log", "sin", "cos", "pi"]
 
         # replace the torch. and np. from before the functions
         for f in functions:
@@ -223,7 +227,10 @@ class DiffEquation(torch.nn.Module):
         variables = sp.symbols(variable_str)
 
         # Convert the equation string to a symbolic expression
-        equation = sp.sympify(equation_str, locals={function: getattr(sp, function) for function in functions})
+        equation = sp.sympify(
+            equation_str,
+            locals={function: getattr(sp, function) for function in functions},
+        )
 
         # Solve for the desired variable
         solution = str(sp.solve(equation, variables)[0])
@@ -233,7 +240,6 @@ class DiffEquation(torch.nn.Module):
             solution = solution.replace(f, f"torch.{f}")
 
         return solution
-
 
     def create_function(self, formula: str, definition=False) -> Callable:
         """
@@ -372,17 +378,20 @@ class DiffEquation(torch.nn.Module):
                 Function to be used in the PDE solver and to train the model
             """
 
-            local_dict: dict[str, Union[torch.Tensor, np.ndarray, float, ModuleType]] = {}
+            local_dict: dict[
+                str, Union[torch.Tensor, np.ndarray, float, ModuleType]
+            ] = {}
 
             # Derivatives of the function
             if definition:
-                
                 # SOLO PARA ORDEN 1 DE DERIVADA DE TIEMPO
                 num_derivatives = [
                     np.pad(numerical_derivative(u, dx, i), (i + 1) // 2)
                     for i in range(1, self.orderx + 1)
                 ]
-                local_dict.update({f'u_x{"x" * i}': num_derivatives[i] for i in range(self.orderx)})
+                local_dict.update(
+                    {f'u_x{"x" * i}': num_derivatives[i] for i in range(self.orderx)}
+                )
                 local_dict["x"] = inputs
                 # local_dict = {'u_t': derivatives / (self.tensor_max - self.tensor_min)}
                 local_dict["t"] = self.tensor_min + inputs * (
@@ -390,14 +399,21 @@ class DiffEquation(torch.nn.Module):
                 )
             else:
                 derivatives_list = calculate_derivative(u, inputs, self.order, 0)
-                local_dict.update({f'u_t{"t" * i}': derivatives_list[i] for i in range(self.order)})
+                local_dict.update(
+                    {f'u_t{"t" * i}': derivatives_list[i] for i in range(self.order)}
+                )
 
                 derivatives_list = calculate_derivative(u, inputs, self.orderx, 1)
-                local_dict.update({f'u_x{"x" * i}': derivatives_list[i] for i in range(self.orderx)})
+                local_dict.update(
+                    {f'u_x{"x" * i}': derivatives_list[i] for i in range(self.orderx)}
+                )
                 if self.dy:
                     derivatives_list = calculate_derivative(u, inputs, self.ordery, 2)
                     local_dict.update(
-                        {f'u_y{"y" * i}': derivatives_list[i] for i in range(self.ordery)}
+                        {
+                            f'u_y{"y" * i}': derivatives_list[i]
+                            for i in range(self.ordery)
+                        }
                     )
                 local_dict["t"] = inputs[:, 0].view(-1, 1)
                 local_dict["x"] = inputs[:, 1].view(-1, 1)
@@ -423,7 +439,7 @@ class DiffEquation(torch.nn.Module):
         """
         self.constants.update(constants)
 
-    def forward_pass(self, inputs, outputs) -> torch.Tensor: # NO DY IN THE EQUATION
+    def forward_pass(self, inputs, outputs) -> torch.Tensor:  # NO DY IN THE EQUATION
         """
         Forward pass of the model if we want to find the function
 
@@ -474,25 +490,25 @@ class DiffEquation(torch.nn.Module):
 class BoundaryCondition:
     def __init__(self, eq: str):
         self.eq = eq
-        self.lhs, self.rhs = eq.split('=')
-        self.elements_to_replace = re.findall(r'u[\w.]*', self.lhs)
+        self.lhs, self.rhs = eq.split("=")
+        self.elements_to_replace = re.findall(r"u[\w.]*", self.lhs)
         self.orders = []
         for elem in self.elements_to_replace:
-            self.u_deriv = elem.split('_')[0].split('d')
+            self.u_deriv = elem.split("_")[0].split("d")
             if len(self.u_deriv) > 1:
                 self.orders.append(len(self.u_deriv[1]))
             else:
                 self.orders.append(0)
-        
-        self.local_dict = {'np': np, 'torch': torch}
+
+        self.local_dict = {"np": np, "torch": torch}
 
     def give_value(self, temps, ts, mask):
         mask, normal_matrix = mask
-        self.local_dict['t'] = ts[mask != 0][:, 0:1]
-        self.local_dict['u'] = temps[mask != 0]
-        self.local_dict['x'] = ts[mask != 0][:, 1:2]
+        self.local_dict["t"] = ts[mask != 0][:, 0:1]
+        self.local_dict["u"] = temps[mask != 0]
+        self.local_dict["x"] = ts[mask != 0][:, 1:2]
         if ts.shape[1] > 2:
-            self.local_dict['y'] = ts[mask != 0][:, 2:3]
+            self.local_dict["y"] = ts[mask != 0][:, 2:3]
         dx = calculate_derivative(temps, ts, max(self.orders), idx=1)
         if ts.shape[1] > 2:
             dy = calculate_derivative(temps, ts, max(self.orders), idx=2)
@@ -508,20 +524,35 @@ class BoundaryCondition:
                 if ts.shape[1] <= 2:
                     derivatives = dx[self.orders[i] - 1][mask != 0]
                 else:
-                    derivatives = torch.cat((dx[self.orders[i] - 1][mask != 0], dy[self.orders[i] - 1][mask != 0]), dim=1)
+                    derivatives = torch.cat(
+                        (
+                            dx[self.orders[i] - 1][mask != 0],
+                            dy[self.orders[i] - 1][mask != 0],
+                        ),
+                        dim=1,
+                    )
                 self.local_dict[elem] = derivatives * normal_matrix
 
         # Check if the shapes are correct
-        assert self.local_dict['t'].shape == self.local_dict['u'].shape, f"Shapes don't match (t, u): {self.local_dict['t'].shape} != {self.local_dict['u'].shape}"
-        assert self.local_dict['x'].shape == self.local_dict['u'].shape, f"Shapes don't match (x, u): {self.local_dict['x'].shape} != {self.local_dict['u'].shape}"
+        assert (
+            self.local_dict["t"].shape == self.local_dict["u"].shape
+        ), f"Shapes don't match (t, u): {self.local_dict['t'].shape} != {self.local_dict['u'].shape}"
+        assert (
+            self.local_dict["x"].shape == self.local_dict["u"].shape
+        ), f"Shapes don't match (x, u): {self.local_dict['x'].shape} != {self.local_dict['u'].shape}"
         if ts.shape[1] > 2:
-            assert self.local_dict['y'].shape == self.local_dict['u'].shape, f"Shapes don't match (y, u): {self.local_dict['y'].shape} != {self.local_dict['u'].shape}"
+            assert (
+                self.local_dict["y"].shape == self.local_dict["u"].shape
+            ), f"Shapes don't match (y, u): {self.local_dict['y'].shape} != {self.local_dict['u'].shape}"
         for elem in self.elements_to_replace:
-            assert self.local_dict[elem].shape == self.local_dict['u'].shape, f"Shapes don't match ({elem}, u): {self.local_dict[elem].shape} != {self.local_dict['u'].shape}"
-                                                                                                                                           
+            assert (
+                self.local_dict[elem].shape == self.local_dict["u"].shape
+            ), f"Shapes don't match ({elem}, u): {self.local_dict[elem].shape} != {self.local_dict['u'].shape}"
 
-        return torch.mean((eval(self.lhs, {}, self.local_dict) - eval(self.rhs, {}, self.local_dict))** 2)
-
+        return torch.mean(
+            (eval(self.lhs, {}, self.local_dict) - eval(self.rhs, {}, self.local_dict))
+            ** 2
+        )
 
 
 class PINN_inference(nn.Module):
@@ -588,9 +619,11 @@ class PINN_inference(nn.Module):
 
         Forces initial conditions to be satisfied if working with ODEs and the boundary conditions if working with PDEs.
         """
-        
+
         if self.data_from_csv:
-            return torch.exp(self.model(inputs) * inputs) + self.initial_conditions[0] - 1
+            return (
+                torch.exp(self.model(inputs) * inputs) + self.initial_conditions[0] - 1
+            )
         return self.model(inputs)
 
     def physics_loss(
@@ -621,7 +654,9 @@ class PINN_inference(nn.Module):
         temps = self(ts)
 
         if diff_equation.dx:
-            return torch.mean((temps[self.mask_initial_conditions] - self.initial_conditions) ** 2)
+            return torch.mean(
+                (temps[self.mask_initial_conditions] - self.initial_conditions) ** 2
+            )
         else:
             loss = 0
             # le resto 1 al la longitud porque la primera condición inicial no es de una derivada
@@ -639,15 +674,14 @@ class PINN_inference(nn.Module):
         """
         Compute the boundary conditions loss of the model.
         """
-        
+
         ts = data.clone().requires_grad_(True).to(DEVICE)
-        temps = self(ts) 
+        temps = self(ts)
         loss = 0
         for bc, mask in zip(self.boundary_conditions, self.boundary_masks):
             bc_class = BoundaryCondition(bc)
             loss += bc_class.give_value(temps, ts, mask)
         return loss
-        
 
     def update_constants(
         self, diff_equation: DiffEquation, constant_values: dict
@@ -668,11 +702,10 @@ class PINN_inference(nn.Module):
 
         diff_equation.constants = constant_values
 
-
     def create_bc_masks(self, diff_equation: DiffEquation, inputs: torch.Tensor):
         """
         We create the masks for the boundary conditions.
-        
+
         """
         self.boundary_masks = []
 
@@ -699,26 +732,27 @@ class PINN_inference(nn.Module):
             normal_matrix = initial_normal_matrix[mask] * torch.tensor(normal_vector)
             self.boundary_masks.append((mask, normal_matrix))
 
-
-
-    def process_bc(self, diff_equation: DiffEquation, data: tuple, initial_conditions: list[str]):
+    def process_bc(
+        self, diff_equation: DiffEquation, data: tuple, initial_conditions: list[str]
+    ):
         _, _, X_test_tensor, y_test_tensor = data
 
         self.mask_initial_conditions = X_test_tensor[:, 0] == 0
         if diff_equation.dx:
             self.create_bc_masks(diff_equation, X_test_tensor)
-        
+
         self.initial_conditions = y_test_tensor[self.mask_initial_conditions]
 
         if diff_equation.dx:
-            initial_conditions = [ic.replace('np.', 'torch.') for ic in initial_conditions]
+            initial_conditions = [
+                ic.replace("np.", "torch.") for ic in initial_conditions
+            ]
             self.boundary_conditions = initial_conditions[1:]
-            
+
         else:
             # Load the initial conditions into the model
             if diff_equation.order > 1:
                 self.initial_conditions = list(initial_conditions.values())
-
 
     def train(
         self,
@@ -789,7 +823,7 @@ class PINN_inference(nn.Module):
                 X_test_tensor, diff_equation
             )
             loss += lambda_ic * initial_conditions_loss
-            
+
             if diff_equation.dx:
                 boundary_conditions_loss = self.boundary_conditions_loss(X_test_tensor)
                 loss += lambda_bc * boundary_conditions_loss
@@ -817,7 +851,9 @@ class PINN_inference(nn.Module):
             if epoch % (n_epochs // 10) == 0:
                 msg = f"""Epoch: {epoch}, Loss: {self.losses[-1]}, MSE Loss: {self.mse_losses[-1]}, Physics Loss: {self.physics_losses[-1]}, Validation Loss: {self.validation_losses[-1]}"""
                 if diff_equation.dx and not diff_equation.dy:
-                    msg += f" Boundary Loss:{self.boundary_conditions_loss(X_test_tensor)}"
+                    msg += (
+                        f" Boundary Loss:{self.boundary_conditions_loss(X_test_tensor)}"
+                    )
                 print(msg)
 
     def plot(self, data: torch.Tensor) -> None:
@@ -890,14 +926,16 @@ class PINN_inference(nn.Module):
         # TODO: pintar los puntos de boundary conditions e initials
         boundary_condition_points = []
         for mask in self.boundary_masks:
-            boundary_condition_points.append(go.Scatter3d(
-                x=X_test[:, 1][mask != 0],
-                y=X_test[:, 0][mask != 0],
-                z=y_pred[:, 0][mask != 0],
-                mode="markers",
-                marker=dict(size=4, opacity=0.9, color="red"),
-                name="Test Data",
-            ))
+            boundary_condition_points.append(
+                go.Scatter3d(
+                    x=X_test[:, 1][mask != 0],
+                    y=X_test[:, 0][mask != 0],
+                    z=y_pred[:, 0][mask != 0],
+                    mode="markers",
+                    marker=dict(size=4, opacity=0.9, color="red"),
+                    name="Test Data",
+                )
+            )
         # Crear la superficie para la función subyacente
         surface_true = go.Surface(
             x=x_test,
@@ -919,7 +957,10 @@ class PINN_inference(nn.Module):
         )
 
         # Crear el gráfico
-        fig = go.Figure(data=[scatter_test, scatter_pred_all, surface_true, surface_pred] + boundary_condition_points)
+        fig = go.Figure(
+            data=[scatter_test, scatter_pred_all, surface_true, surface_pred]
+            + boundary_condition_points
+        )
         fig.update_layout(
             scene=dict(
                 xaxis_title="x",
@@ -934,14 +975,21 @@ class PINN_inference(nn.Module):
         fig.show()
 
     def plot_2d(self, data: torch.Tensor) -> None:
-        print('Generating GIF')
+        print("Generating GIF")
         delta_t = 0.1
 
         max_iter_time = 100
-        plate_length = int(np.sqrt(len(data[3])/max_iter_time))
+        plate_length = int(np.sqrt(len(data[3]) / max_iter_time))
         # Precompute the surfaces outside the animate function
-        surface_pred = self(data[2]).reshape(max_iter_time, plate_length, plate_length).detach().numpy()
-        surface_true = data[3].reshape(max_iter_time, plate_length, plate_length).detach().numpy()
+        surface_pred = (
+            self(data[2])
+            .reshape(max_iter_time, plate_length, plate_length)
+            .detach()
+            .numpy()
+        )
+        surface_true = (
+            data[3].reshape(max_iter_time, plate_length, plate_length).detach().numpy()
+        )
 
         # Create a figure with two subplots
         fig, axs = plt.subplots(1, 2, figsize=(12, 6))
@@ -959,34 +1007,31 @@ class PINN_inference(nn.Module):
         fig.colorbar(im2, ax=ax2)
 
         # Set initial titles and labels
-        ax1.set_title('Predicted Temperature at t = 0.000')
-        ax1.set_xlabel('x')
-        ax1.set_ylabel('y')
+        ax1.set_title("Predicted Temperature at t = 0.000")
+        ax1.set_xlabel("x")
+        ax1.set_ylabel("y")
 
-        ax2.set_title('True Temperature at t = 0.000')
-        ax2.set_xlabel('x')
-        ax2.set_ylabel('y')
+        ax2.set_title("True Temperature at t = 0.000")
+        ax2.set_xlabel("x")
+        ax2.set_ylabel("y")
 
         def animate(k):
             u_k_pred = surface_pred[k]
             u_k_true = surface_true[k]
-            
+
             # Update the data in the images
             im1.set_data(u_k_pred)
             im2.set_data(u_k_true)
-            
+
             # Update the titles to reflect the current time
-            ax1.set_title(f'Predicted Temperature at t = {k*delta_t:.3f}')
-            ax2.set_title(f'True Temperature at t = {k*delta_t:.3f}')
+            ax1.set_title(f"Predicted Temperature at t = {k*delta_t:.3f}")
+            ax2.set_title(f"True Temperature at t = {k*delta_t:.3f}")
 
         # Create the animation
-        anim = animation.FuncAnimation(fig, animate, frames=max_iter_time, interval=1, blit=False)
+        anim = animation.FuncAnimation(
+            fig, animate, frames=max_iter_time, interval=1, blit=False
+        )
 
         # Save the animation as a GIF
         writer = animation.PillowWriter(fps=10)
         anim.save("heat_equation_solution.gif", writer=writer)
-
-
-
-
-

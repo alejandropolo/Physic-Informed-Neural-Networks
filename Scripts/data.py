@@ -12,7 +12,7 @@ from scipy.integrate import odeint
 import matplotlib.pyplot as plt
 import plotly.graph_objects as go
 
-sys.path.append('../Scripts/')
+sys.path.append("../Scripts/")
 import PINN_moredim
 
 importlib.reload(PINN_moredim)
@@ -21,6 +21,7 @@ from PINN_moredim import DiffEquation, min_max_normalize
 # from train import train
 
 import warnings
+
 warnings.filterwarnings("ignore")
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -64,7 +65,7 @@ def load_data_ode(
     ini_conditions = [0 for _ in range(order)]
     for equation in initial_conditions:
         lhs, rhs = equation.split("=")
-        if '.' not in lhs:
+        if "." not in lhs:
             ini_conditions[0] = float(rhs)
         else:
             order_str = lhs.split("_")[0].split(".")[1]
@@ -147,14 +148,14 @@ def load_data_pde(
     x_train = np.linspace(L_min, L, N_train)
 
     dx_train = x_train[1] - x_train[0]
-    T_mesh_train, X_mesh_train = np.meshgrid(t_train, x_train, indexing="ij") # cambiar
+    T_mesh_train, X_mesh_train = np.meshgrid(t_train, x_train, indexing="ij")  # cambiar
 
     part_function = diff_equation(definition=True)
 
     # Inicialización de la matriz u
     u = np.zeros((N_train, N_train))
     for eq in initial_conditions:
-        lhs, rhs = eq.split('=')
+        lhs, rhs = eq.split("=")
         ic = lhs.strip().split("_")[1:]
         ini_func = lambda x: eval(
             str(rhs), {"x": x, "t": 0}, {"np": np, "torch": torch}
@@ -163,7 +164,7 @@ def load_data_pde(
             # To be able to evaluate the string as a function
             u[int(ic[0]), :] = ini_func(X_mesh_train[0, :])
         elif ic[0] == "t":
-            if ic[1].strip() == 'L':
+            if ic[1].strip() == "L":
                 u[:, -1] = ini_func(X_mesh_train[:, -1])
             else:
                 u[:, int(ic[1])] = ini_func(X_mesh_train[:, 0])
@@ -199,7 +200,7 @@ def load_data_pde(
     u = np.zeros((N_test, N_test))
 
     for eq in initial_conditions:
-        lhs, rhs = eq.split('=')
+        lhs, rhs = eq.split("=")
         ic = lhs.strip().split("_")[1:]
         ini_func = lambda x: eval(
             str(rhs), {"x": x, "t": 0}, {"np": np, "torch": torch}
@@ -208,7 +209,7 @@ def load_data_pde(
             # To be able to evaluate the string as a function
             u[int(ic[0]), :] = ini_func(X_mesh_test[0, :])
         elif ic[0] == "t":
-            if ic[1].strip() == 'L':
+            if ic[1].strip() == "L":
                 u[:, -1] = ini_func(X_mesh_test[:, -1])
             else:
                 u[:, int(ic[1])] = ini_func(X_mesh_test[:, 0])
@@ -277,21 +278,26 @@ def load_data_moredim(
     plate_length: int,
     max_iter_time: int,
 ):
-
     # solution
-    func = lambda t, x, y: eval(f, {"t": t, "x": x, "y": y, "torch": torch, "np": np}, diff_equation.constants)
+    func = lambda t, x, y: eval(
+        f, {"t": t, "x": x, "y": y, "torch": torch, "np": np}, diff_equation.constants
+    )
 
     train_t = np.linspace(0, T, max_iter_time)
     train_x = np.linspace(0, L, plate_length)
     train_y = np.linspace(0, L, plate_length)
 
-    T_mesh, X_mesh, Y_mesh = np.meshgrid(train_t, train_x, train_y, indexing="ij") # cambiar
-    mesh = np.hstack((T_mesh.reshape(-1, 1), X_mesh.reshape(-1, 1), Y_mesh.reshape(-1, 1)))
+    T_mesh, X_mesh, Y_mesh = np.meshgrid(
+        train_t, train_x, train_y, indexing="ij"
+    )  # cambiar
+    mesh = np.hstack(
+        (T_mesh.reshape(-1, 1), X_mesh.reshape(-1, 1), Y_mesh.reshape(-1, 1))
+    )
     input_mesh = torch.tensor(mesh).float()
     y = func(input_mesh[:, 0], input_mesh[:, 1], input_mesh[:, 2])
     y = torch.tensor(y).reshape(len(input_mesh), 1).float()
 
-    if not (diff_equation.func_to_optimize or params_to_optimize): # False: # 
+    if not (diff_equation.func_to_optimize or params_to_optimize):  # False: #
         # Cogemos solo los datos en x == 0 y x == L
         mask = (
             (input_mesh[:, 0] == 0)
@@ -314,25 +320,29 @@ def load_data_neumann(
     L: float,
     T: float,
     N_train: int,
-    ):
+):
+    # solution
 
-	# solution
-
-    func = lambda t, x: eval(f, {"t": t, "x": x, "torch": torch, "np": np, "pi": np.pi}, diff_equation.constants)
+    func = lambda t, x: eval(
+        f,
+        {"t": t, "x": x, "torch": torch, "np": np, "pi": np.pi},
+        diff_equation.constants,
+    )
 
     train_t = np.linspace(0, T, N_train)
     train_x = np.linspace(eval(str(L_min)), eval(str(L)), N_train)
 
-    T_mesh, X_mesh = np.meshgrid(train_t, train_x, indexing="ij") # cambiar
+    T_mesh, X_mesh = np.meshgrid(train_t, train_x, indexing="ij")  # cambiar
     mesh = np.hstack((T_mesh.reshape(-1, 1), X_mesh.reshape(-1, 1)))
     input_mesh = torch.tensor(mesh).float()
     y = func(input_mesh[:, 0], input_mesh[:, 1])
     y = torch.tensor(y).reshape(len(input_mesh), 1).float()
 
-    if not (diff_equation.func_to_optimize or params_to_optimize): 
+    if not (diff_equation.func_to_optimize or params_to_optimize):
         # Cogemos solo los datos en x == 0 y x == L
         mask = (
-            (input_mesh[:, 0] == 0)
+            input_mesh[:, 0]
+            == 0
             # | (input_mesh[:, 0] < 0.12)
             # (input_mesh[:, 1] == L_min) |
             # (input_mesh[:, 1] == L)
@@ -340,9 +350,7 @@ def load_data_neumann(
         input_mesh_train = input_mesh[mask]
         y_train = y[mask]
 
-
-
-	# Crear Scatter3d para datos de entrenamiento y prueba
+    # Crear Scatter3d para datos de entrenamiento y prueba
     scatter_train = go.Scatter3d(
         x=input_mesh_train[:, 1],
         y=input_mesh_train[:, 0],
@@ -386,67 +394,92 @@ def load_data_neumann(
     return (input_mesh_train, y_train, input_mesh, y)
 
 
-def load_csv_data(diff_equation: DiffEquation, filename: str , params_to_optimize: list[str] = [], noise: float = 0.0):
+def load_csv_data(
+    diff_equation: DiffEquation,
+    filename: str,
+    params_to_optimize: list[str] = [],
+    noise: float = 0.0,
+):
+    col = "Voltage_Eq"
 
-    col = 'Voltage_Eq'
-    
     df = pd.read_csv(filename)
-    df['Time'] = df['Time'].round(2) ## Evita efectos raros en las derivasdas por valores temporales muy proximos
-    df.drop_duplicates(subset=['Time'], keep='first', inplace=True)
-    df.drop_duplicates(subset=['v_cell'], keep='first', inplace=True)
-    df.drop_duplicates(subset=['t_membrane'], keep='first', inplace=True)  
+    df["Time"] = df["Time"].round(
+        2
+    )  ## Evita efectos raros en las derivasdas por valores temporales muy proximos
+    df.drop_duplicates(subset=["Time"], keep="first", inplace=True)
+    df.drop_duplicates(subset=["v_cell"], keep="first", inplace=True)
+    df.drop_duplicates(subset=["t_membrane"], keep="first", inplace=True)
 
     df = df.loc[df.Time > 200]
-    df = df[(df['T'] > 79) & (df['T'] < 81)]
-    k_1_mean = df['k_1'].mean()
-    k_2_mean = df['k_2'].mean()
-    k_3_mean = df['k_3'].mean()
+    df = df[(df["T"] > 79) & (df["T"] < 81)]
+    k_1_mean = df["k_1"].mean()
+    k_2_mean = df["k_2"].mean()
+    k_3_mean = df["k_3"].mean()
 
+    df["Voltage_Eq"] = (
+        k_1_mean
+        + k_2_mean * np.log(df["power_elec"] / df["v_cell"])
+        + k_3_mean * df["power_elec"] * df["t_membrane"] / df["v_cell"]
+    )
+    k_1_mean_mod = k_1_mean + k_2_mean * np.log(100000.0) - k_2_mean
 
-    df['Voltage_Eq'] = k_1_mean+k_2_mean*np.log(df['power_elec']/df['v_cell'])+k_3_mean*df['power_elec']*df['t_membrane']/df['v_cell']
-    k_1_mean_mod = (k_1_mean+k_2_mean*np.log(100000.0)-k_2_mean)
-    
-
-    X_test_tensor = torch.tensor(df['Time'].values, dtype=torch.float32, device=DEVICE).view(-1,1)
-    y_test_tensor = torch.tensor(df[col].values, dtype=torch.float32, device=DEVICE).view(-1,1)
+    X_test_tensor = torch.tensor(
+        df["Time"].values, dtype=torch.float32, device=DEVICE
+    ).view(-1, 1)
+    y_test_tensor = torch.tensor(
+        df[col].values, dtype=torch.float32, device=DEVICE
+    ).view(-1, 1)
 
     ## Min Max Scale
-    X_test_tensor,tensor_min,tensor_max = min_max_normalize(X_test_tensor)
+    X_test_tensor, tensor_min, tensor_max = min_max_normalize(X_test_tensor)
 
     ## Select n first points as train
     n_points = 1
-    t = np.round(np.linspace(0, len(X_test_tensor)//2, n_points))
+    t = np.round(np.linspace(0, len(X_test_tensor) // 2, n_points))
     if params_to_optimize:
         n_points = 6
-        t = np.round(np.linspace(0, len(X_test_tensor)//2, n_points))
+        t = np.round(np.linspace(0, len(X_test_tensor) // 2, n_points))
 
-        t = np.concatenate((t,np.array([len(X_test_tensor)-40])))
-        t = np.concatenate((t,np.array([len(X_test_tensor)-25])))
+        t = np.concatenate((t, np.array([len(X_test_tensor) - 40])))
+        t = np.concatenate((t, np.array([len(X_test_tensor) - 25])))
         # t = np.concatenate((t,np.array([len(X_test_tensor)-10])))
         # t = np.concatenate((t,np.array([len(X_test_tensor)-1])))
-
 
     X_tensor = X_test_tensor[t]
     y_tensor = y_test_tensor[t]
 
     ## Add noise to y_tensor but not to the first point
-    y_tensor[1:] = y_tensor[1:] + noise * torch.randn(len(y_tensor)-1,1)
+    y_tensor[1:] = y_tensor[1:] + noise * torch.randn(len(y_tensor) - 1, 1)
 
     ## Scatterplot of the training data and test data
-    plt.scatter(X_test_tensor.detach().numpy(), y_test_tensor.detach().numpy(),label='Test data',s=5)
-    plt.scatter(X_tensor.detach().numpy(), y_tensor.detach().numpy(),label='Training data',color='orange')
+    plt.scatter(
+        X_test_tensor.detach().numpy(),
+        y_test_tensor.detach().numpy(),
+        label="Test data",
+        s=5,
+    )
+    plt.scatter(
+        X_tensor.detach().numpy(),
+        y_tensor.detach().numpy(),
+        label="Training data",
+        color="orange",
+    )
     ## Plot also real voltage
-    #plt.plot(X_test_tensor.detach().numpy(), df['Voltage_Eq'].values,label='Real Voltage',color='red')
-    plt.xlabel('Time')
-    plt.ylabel('Voltage')
-    plt.title('Training data')
+    # plt.plot(X_test_tensor.detach().numpy(), df['Voltage_Eq'].values,label='Real Voltage',color='red')
+    plt.xlabel("Time")
+    plt.ylabel("Voltage")
+    plt.title("Training data")
     plt.legend()
     plt.show()
 
     diff_equation.tensor_max = tensor_max
     diff_equation.tensor_min = tensor_min
-    constants = {'k_1_mean_mod': k_1_mean_mod, 'k_1_mean': k_1_mean, 'k_2_mean': k_2_mean, 'k_3_mean': k_3_mean}
+    constants = {
+        "k_1_mean_mod": k_1_mean_mod,
+        "k_1_mean": k_1_mean,
+        "k_2_mean": k_2_mean,
+        "k_3_mean": k_3_mean,
+    }
     diff_equation.set_constants(constants)
 
     return (X_tensor, y_tensor, X_test_tensor, y_test_tensor)
-
