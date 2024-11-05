@@ -16,7 +16,7 @@ equation:
 
 
 data_load:
-  L_min: 0
+  L_min: -1
   L: 1
   T: 1.0
   N_train: 10
