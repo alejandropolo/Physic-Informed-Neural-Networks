@@ -59,14 +59,10 @@ def calculate_derivative(
     derivatives_list = []
     if order == 0:
         return [outputs]
-    derivatives_list.append(grad(outputs, inputs)[0])
-    if idx is not None:
-        derivatives_list[-1] = derivatives_list[-1][:, idx : idx + 1]
+    derivatives_list.append(grad(outputs, inputs)[0][:, idx : idx + 1])
     for _ in range(order - 1):
         # aqui solo devolvemos el indice(t, x, ...) que queremos (idx) pero para el normal necesitaremos todos
-        derivatives_list.append(grad(derivatives_list[-1], inputs)[0])
-        if idx is not None:
-            derivatives_list[-1] = derivatives_list[-1][:, idx : idx + 1]
+        derivatives_list.append(grad(derivatives_list[-1], inputs)[0][:, idx : idx + 1])
 
     return derivatives_list
 
@@ -488,27 +484,38 @@ class DiffEquation(torch.nn.Module):
 
 
 class BoundaryCondition:
-    def __init__(self, eq: str):
+    def __init__(self, eq: str, constants: dict) -> None:
         self.eq = eq
+        self.constants = constants
         self.lhs, self.rhs = eq.split("=")
         self.elements_to_replace = re.findall(r"u[\w.]*", self.lhs)
         self.orders = []
+        self.variables_to_derive = []
         for elem in self.elements_to_replace:
-            self.u_deriv = elem.split("_")[0].split("d")
-            if len(self.u_deriv) > 1:
-                self.orders.append(len(self.u_deriv[1]))
+            u_deriv = elem.split("_")[0].split("d")
+            # We have to calculate the order of the derivative
+            if len(u_deriv) > 1:
+                self.orders.append(len(u_deriv[1]))
+                # We have to know which variable we are deriving (x, y)
+                self.variables_to_derive.append(u_deriv[1])
             else:
                 self.orders.append(0)
+                self.variables_to_derive.append(None)
+
+            # We already know where we will evaluate (udx_t_0 and udx_t_L) because we have the mask
 
         self.local_dict = {"np": np, "torch": torch}
 
-    def give_value(self, temps, ts, mask):
+    def give_value(self, temps: torch.Tensor, ts: torch.Tensor, mask: torch.Tensor):
         mask, normal_matrix = mask
-        self.local_dict["t"] = ts[mask != 0][:, 0:1]
         self.local_dict["u"] = temps[mask != 0]
+        self.local_dict["t"] = ts[mask != 0][:, 0:1]
         self.local_dict["x"] = ts[mask != 0][:, 1:2]
         if ts.shape[1] > 2:
             self.local_dict["y"] = ts[mask != 0][:, 2:3]
+        
+        # Esto depende de que derivada esté calculando
+        
         dx = calculate_derivative(temps, ts, max(self.orders), idx=1)
         if ts.shape[1] > 2:
             dy = calculate_derivative(temps, ts, max(self.orders), idx=2)
@@ -526,12 +533,15 @@ class BoundaryCondition:
                 else:
                     derivatives = torch.cat(
                         (
-                            dx[self.orders[i] - 1][mask != 0],
-                            dy[self.orders[i] - 1][mask != 0],
+                            dx[self.orders[i] - 1][mask != 0] if self.variables_to_derive[i] == "x" else temps[mask != 0],
+                            dy[self.orders[i] - 1][mask != 0] if self.variables_to_derive[i] == "y" else temps[mask != 0],
                         ),
                         dim=1,
                     )
-                self.local_dict[elem] = derivatives * normal_matrix
+                
+                self.local_dict[elem] = torch.sum(derivatives * normal_matrix, dim=1).view(-1, 1)
+                # self.local_dict[elem] = torch.einsum('nm, nm -> n', derivatives, normal_matrix).view(-1, 1)
+        self.local_dict.update(self.constants)
 
         # Check if the shapes are correct
         assert (
@@ -635,7 +645,6 @@ class PINN_inference(nn.Module):
 
         ts = data.clone().requires_grad_(True).to(DEVICE)
         temps = self(ts)
-
         # First call the differential equation class to create the function and then evaluates it
         if not diff_equation.dx and not diff_equation.func_to_optimize:
             pde = diff_equation()(temps, ts)
@@ -677,9 +686,11 @@ class PINN_inference(nn.Module):
 
         ts = data.clone().requires_grad_(True).to(DEVICE)
         temps = self(ts)
+        # f = lambda t, x, y: torch.sin(torch.pi * x) * torch.sin(torch.pi * y) * torch.exp(-2 * 0.05 * torch.pi ** 2 * t)
+        # temps = f(ts[:, 0], ts[:, 1], ts[:, 2]).view(-1, 1)
         loss = 0
         for bc, mask in zip(self.boundary_conditions, self.boundary_masks):
-            bc_class = BoundaryCondition(bc)
+            bc_class = BoundaryCondition(bc, self.constant_values)
             loss += bc_class.give_value(temps, ts, mask)
         return loss
 
@@ -771,7 +782,7 @@ class PINN_inference(nn.Module):
 
         # Load the initial and boundary conditions into the model
         self.process_bc(diff_equation, data, initial_conditions)
-
+        self.constant_values = constant_values
         # Inicializar el optimizador
         optimizer: torch.optim.Optimizer
         if optimizer_name == "lbfgs":
@@ -850,7 +861,7 @@ class PINN_inference(nn.Module):
 
             if epoch % (n_epochs // 10) == 0:
                 msg = f"""Epoch: {epoch}, Loss: {self.losses[-1]}, MSE Loss: {self.mse_losses[-1]}, Physics Loss: {self.physics_losses[-1]}, Validation Loss: {self.validation_losses[-1]}"""
-                if diff_equation.dx and not diff_equation.dy:
+                if diff_equation.dx:
                     msg += (
                         f" Boundary Loss:{self.boundary_conditions_loss(X_test_tensor)}"
                     )
@@ -974,12 +985,10 @@ class PINN_inference(nn.Module):
         )  # Ajusta el tamaño del texto de la leyenda
         fig.show()
 
-    def plot_2d(self, data: torch.Tensor) -> None:
+    def plot_2d(self, data: torch.Tensor, plate_length: int, max_iter_time: int) -> None:
         print("Generating GIF")
         delta_t = 0.1
 
-        max_iter_time = 100
-        plate_length = int(np.sqrt(len(data[3]) / max_iter_time))
         # Precompute the surfaces outside the animate function
         surface_pred = (
             self(data[2])

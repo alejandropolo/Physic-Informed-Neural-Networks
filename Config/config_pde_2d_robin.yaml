@@ -10,10 +10,10 @@ equation:
   f: 'torch.sin(torch.pi * x) * torch.sin(torch.pi * y) * torch.exp(-2 * alpha * torch.pi ** 2 * t)'
   initial_conditions: [
     'u_0_x_y = torch.sin(torch.pi * x) * torch.sin(torch.pi * y)',
-    'u_t_0_y = 0',
-    'u_t_L_y = 0',
-    'u_t_x_0 = 0',
-    'u_t_x_L = 0',
+    'u_t_0_y + udx_t_0_y = - torch.sin(torch.pi * y) * torch.exp(-2 * alpha * torch.pi ** 2 * t) * torch.pi',
+    'u_t_L_y + udx_t_L_y = - torch.sin(torch.pi * y) * torch.exp(-2 * alpha * torch.pi ** 2 * t) * torch.pi',
+    'u_t_x_0 + udy_t_x_0 = - torch.sin(torch.pi * x) * torch.exp(-2 * alpha * torch.pi ** 2 * t) * torch.pi',
+    'u_t_x_L + udy_t_x_L = - torch.sin(torch.pi * x) * torch.exp(-2 * alpha * torch.pi ** 2 * t) * torch.pi',
   ]
 
 
